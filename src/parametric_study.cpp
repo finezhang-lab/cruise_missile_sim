@@ -24,11 +24,12 @@
 // ---------------------------------------------------------------------------
 std::vector<TrajectoryRecord> runCase(const TrajectoryParams& params) {
     StateVec x0{};
-    x0[IDX_V]     = 0.0;                        // 零速度发射
-    x0[IDX_THETA] = 2.0 * config::DEG2RAD;      // 初始弹道倾角 2°
+    // 弹道计算从助推器分离后的巡航状态开始，避免 V=0 奇点
+    x0[IDX_V]     = 120.0;                              // 助推段末速度 [m/s]
+    x0[IDX_THETA] = 0.0;                                // 水平飞行
     x0[IDX_X]     = 0.0;
-    x0[IDX_Y]     = 5.0;                        // 发射架高度 5 m
-    x0[IDX_M]     = params.initial_mass;
+    x0[IDX_Y]     = params.cruise_alt;                  // 直接到达巡航高度
+    x0[IDX_M]     = config::MASS_LAUNCH - config::MASS_BOOSTER;  // 1150 kg
 
     return integrateTrajectory(x0, 0.0, params, trajectoryDerivatives);
 }

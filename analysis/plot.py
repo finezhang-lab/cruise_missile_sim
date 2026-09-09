@@ -22,12 +22,46 @@ import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 
-# 中文字体设置 (Windows)
-matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+# 中文字体设置: 优先使用系统已安装的中文字体
+import matplotlib.font_manager as fm
+
+_CJK_FONT_NAMES = [
+    'WenQuanYi Micro Hei',
+    'Noto Sans CJK SC',
+    'Source Han Sans SC',
+    'SimHei',
+    'Microsoft YaHei',
+    'DejaVu Sans',
+]
+
+def _find_cjk_font():
+    available = {f.name for f in fm.fontManager.ttflist}
+    for name in _CJK_FONT_NAMES:
+        if name in available:
+            return name
+    return 'DejaVu Sans'
+
+matplotlib.rcParams['font.sans-serif'] = [_find_cjk_font(), 'DejaVu Sans']
 matplotlib.rcParams['axes.unicode_minus'] = False
 
-# 输出目录
-OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output')
+# 输出目录: 兼容从项目根目录运行和从 build/bin 运行
+# 优先选择包含 CSV 数据文件的目录
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
+OUTPUT_DIR_CANDIDATES = [
+    os.path.join(_PROJECT_ROOT, 'output'),
+    os.path.join(_PROJECT_ROOT, 'build', 'bin', 'output'),
+]
+
+def _pick_output_dir():
+    candidates_with_data = [p for p in OUTPUT_DIR_CANDIDATES
+                            if os.path.isdir(p) and glob.glob(os.path.join(p, '*.csv'))]
+    if candidates_with_data:
+        return candidates_with_data[0]
+    existing = [p for p in OUTPUT_DIR_CANDIDATES if os.path.isdir(p)]
+    return existing[0] if existing else OUTPUT_DIR_CANDIDATES[0]
+
+OUTPUT_DIR = _pick_output_dir()
 FIGURE_DIR = os.path.join(os.path.dirname(__file__), 'figures')
 
 def ensure_dir(path):
@@ -113,6 +147,8 @@ def plot_aero():
         plt.savefig(os.path.join(FIGURE_DIR, 'aero_mach_sweep.png'), dpi=150)
         plt.close()
         print("  -> aero_mach_sweep.png")
+    else:
+        print(f"  未找到 {fpath}")
 
 
 # ============================================================================
@@ -136,6 +172,8 @@ def plot_propulsion():
         plt.savefig(os.path.join(FIGURE_DIR, 'propulsion_booster.png'), dpi=150)
         plt.close()
         print("  -> propulsion_booster.png")
+    else:
+        print(f"  未找到 {fpath}")
 
     # 2.2 涡扇推力随高度变化
     fpath = os.path.join(OUTPUT_DIR, 'propulsion_engine.csv')
