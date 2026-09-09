@@ -84,22 +84,13 @@ aerodynamics ──→ trajectory    parametric_study ←──┘
 
 ### 团队分工
 
-| 成员 | 学院 / 专业 / 年级 | 负责模块 | 对应课题阶段 | 主要职责 |
-|---|---|---|---|---|
-| **张帆** | 航空航天 / 机械 / 博二 | `config.h` + 全部 `.h` 接口 | 全部 | 程序架构设计、代码合并与审查、报告修订 |
-| **杜立成** | 航空航天 / 力学 / 博三 | `trajectory.h/cpp` + `integrator.h/cpp` | 阶段三、四 | 质点运动方程实现、RK4 积分器、飞行阶段切换 |
-| **姚飞** | 航空航天 / 工程力学 / 大二 | `propulsion.h/cpp` | 阶段二 | 固体助推器推力模型、涡扇推力/SFC 修正模型 |
-| **曾刘彰文** | 竺可桢学院 / 工程力学 / 大二 | `atmosphere.h/cpp` + `aerodynamics.h/cpp` | 阶段一 | ISA 标准大气、升力/阻力系数、静稳定性、配平攻角 |
-| **楼宇凡** | 竺可桢学院 / 工程力学 / 大二 | `parametric_study.h/cpp` + `data_output.h/cpp` | §3-三 | 基准工况分析、D 系列参数扫描、CSV 输出 |
-
-### 公共模块
-
-| 文件 | 负责人 | 说明 |
+| 负责人 | 负责模块 | 主要职责 |
 |---|---|---|
-| `config.h` | 张帆 | 导弹参数、物理常数，其他人只读 |
-| `main.cpp` | 张帆 | 调度入口，不含计算逻辑 |
-| `CMakeLists.txt` | 张帆 | 构建配置 |
-| `analysis/plot.py` | 楼宇凡 | 后处理绘图 |
+| **张** | `config.h` + 全部 `.h` 接口 + `main.cpp` + `CMakeLists.txt` | 程序架构设计、代码合并与审查、报告修订 |
+| **杜** | `trajectory.h/cpp` + `integrator.h/cpp` | 质点运动方程实现、RK4 积分器、飞行阶段切换 |
+| **姚** | `propulsion.h/cpp` | 固体助推器推力模型、涡扇推力/SFC 修正模型 |
+| **曾刘** | `atmosphere.h/cpp` + `aerodynamics.h/cpp` | ISA 标准大气、升力/阻力系数、静稳定性、配平攻角 |
+| **楼** | `parametric_study.h/cpp` + `data_output.h/cpp` + `analysis/plot.py` | 基准工况分析、D 系列参数扫描、CSV 输出、绘图 |
 
 ## 开发规范
 
