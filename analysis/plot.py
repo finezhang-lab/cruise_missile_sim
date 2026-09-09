@@ -28,9 +28,11 @@ matplotlib.rcParams['axes.unicode_minus'] = False
 
 # 输出目录: 兼容从项目根目录运行和从 build/bin 运行
 # 优先选择包含 CSV 数据文件的目录
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
 OUTPUT_DIR_CANDIDATES = [
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output'),
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), 'build', 'bin', 'output'),
+    os.path.join(_PROJECT_ROOT, 'output'),
+    os.path.join(_PROJECT_ROOT, 'build', 'bin', 'output'),
 ]
 
 def _pick_output_dir():
