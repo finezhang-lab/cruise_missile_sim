@@ -134,7 +134,9 @@ std::vector<TrajectoryRecord> integrateTrajectory(
     StateVec state = initial_state;
     double t = t_start;
     double fuel_at_cruise_start = params.fuel_mass;
-    bool booster_separated = false;
+    // 若初始质量已接近助推器分离后质量，视为已分离
+    double mass_after_boost = config::MASS_LAUNCH - config::MASS_BOOSTER;
+    bool booster_separated = (state[IDX_M] <= mass_after_boost + 1.0);
 
     // 记录初始状态
     records.push_back(buildRecord(state, t, params));

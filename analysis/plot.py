@@ -26,8 +26,12 @@ import numpy as np
 matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
 matplotlib.rcParams['axes.unicode_minus'] = False
 
-# 输出目录
-OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output')
+# 输出目录: 兼容从项目根目录运行和从 build/bin 运行
+OUTPUT_DIR_CANDIDATES = [
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output'),
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), 'build', 'bin', 'output'),
+]
+OUTPUT_DIR = next((p for p in OUTPUT_DIR_CANDIDATES if os.path.isdir(p)), OUTPUT_DIR_CANDIDATES[0])
 FIGURE_DIR = os.path.join(os.path.dirname(__file__), 'figures')
 
 def ensure_dir(path):

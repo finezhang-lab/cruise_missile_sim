@@ -123,7 +123,7 @@ bool checkTermination(const StateVec& state, double t, const TrajectoryParams& p
     if (t >= config::MAX_SIM_TIME) return true;
 
     // 条件 2: 触地 (高度 < 0)
-    if (y < 0.0 && t > config::BOOSTER_BURN_TIME + 5.0) return true;
+    if (y < 0.0) return true;
 
     // 条件 3: 巡航段燃油耗尽
     // 助推段结束后，导弹质量 = 发射质量 - 助推器(含壳体) - 已消耗燃油

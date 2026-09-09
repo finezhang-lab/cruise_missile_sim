@@ -11,11 +11,12 @@
 
 // ---------------------------------------------------------------------------
 // 飞行阶段判断
-// 助推段: t <= BOOSTER_BURN_TIME 且助推器尚未分离
-// 巡航段: 助推器分离后，涡扇发动机工作
+// 助推段: t <= BOOSTER_BURN_TIME 且质量仍为发射质量级（含助推器）
+// 巡航段: 助推器已分离，或时间已超过助推段
 // ---------------------------------------------------------------------------
 FlightPhase getFlightPhase(double t, double mass) {
-    if (t <= config::BOOSTER_BURN_TIME) {
+    double mass_after_boost = config::MASS_LAUNCH - config::MASS_BOOSTER;
+    if (t <= config::BOOSTER_BURN_TIME && mass > mass_after_boost + 1.0) {
         return FlightPhase::BOOST;
     }
     return FlightPhase::CRUISE;
