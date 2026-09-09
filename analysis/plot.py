@@ -22,8 +22,26 @@ import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 
-# 中文字体设置 (Windows)
-matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+# 中文字体设置: 优先使用系统已安装的中文字体
+import matplotlib.font_manager as fm
+
+_CJK_FONT_NAMES = [
+    'WenQuanYi Micro Hei',
+    'Noto Sans CJK SC',
+    'Source Han Sans SC',
+    'SimHei',
+    'Microsoft YaHei',
+    'DejaVu Sans',
+]
+
+def _find_cjk_font():
+    available = {f.name for f in fm.fontManager.ttflist}
+    for name in _CJK_FONT_NAMES:
+        if name in available:
+            return name
+    return 'DejaVu Sans'
+
+matplotlib.rcParams['font.sans-serif'] = [_find_cjk_font(), 'DejaVu Sans']
 matplotlib.rcParams['axes.unicode_minus'] = False
 
 # 输出目录: 兼容从项目根目录运行和从 build/bin 运行
