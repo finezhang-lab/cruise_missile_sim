@@ -25,7 +25,8 @@
 std::vector<TrajectoryRecord> runCase(const TrajectoryParams& params) {
     StateVec x0{};
     // 弹道计算从助推器分离后的巡航状态开始，避免 V=0 奇点
-    x0[IDX_V]     = 120.0;                              // 助推段末速度 [m/s]
+    AtmosphereState atm_init = calcAtmosphere(params.cruise_alt);
+    x0[IDX_V] = params.cruise_mach * atm_init.a;        // 扫描 Ma 真正注入巡航段起始速度 [m/s]
     x0[IDX_THETA] = 0.0;                                // 水平飞行
     x0[IDX_X]     = 0.0;
     x0[IDX_Y]     = params.cruise_alt;                  // 直接到达巡航高度
@@ -42,58 +43,24 @@ PhaseAnalysis analyzeBaseline(const std::vector<TrajectoryRecord>& records) {
 
     if (records.empty()) return pa;
 
-    // ---- 分段：助推段 (phase==0) vs 巡航段 (phase==1) ----
-    int n_boost = 0, n_cruise = 0;
+    // 累加巡航段(phase==1)状态:records 在当前 runCase 设计下全 phase=1
+    int n_cruise = 0;
     double sum_alpha = 0, sum_LD = 0, sum_T = 0, sum_D = 0;
     double sum_V = 0, sum_h = 0;
-    double boost_max_dVdt = 0.0;
-    double boost_end_V = 0.0;
 
-    for (size_t i = 0; i < records.size(); ++i) {
-        const auto& r = records[i];
 
-        if (r.phase == 0) {
-            // 助推段
-            ++n_boost;
-            boost_end_V = r.V;
-
-            // 用相邻记录估算瞬时加速度
-            if (i > 0) {
-                double dt = r.t - records[i - 1].t;
-                if (dt > 0 && records[i - 1].phase == 0) {
-                    double accel = (r.V - records[i - 1].V) / dt;
-                    if (accel > boost_max_dVdt) {
-                        boost_max_dVdt = accel;
-                    }
-                }
-            }
-        } else {
-            // 巡航段
+    for (const auto& r : records) {
+            if (r.phase != 1) continue;
             ++n_cruise;
             sum_alpha += r.alpha;
-
             double ld = (r.D > 0.1) ? (r.L / r.D) : 0.0;
             sum_LD += ld;
             sum_T  += r.T;
             sum_D  += r.D;
             sum_V  += r.V;
             sum_h  += r.y;
-        }
+        
     }
-
-    // ---- 助推段统计 ----
-    pa.boost_end_V_ms    = boost_end_V;
-    pa.boost_max_accel_g = boost_max_dVdt / config::g0;
-    if (n_boost > 0) {
-        // 找助推段最后一条记录的时间
-        for (auto rit = records.rbegin(); rit != records.rend(); ++rit) {
-            if (rit->phase == 0) {
-                pa.boost_time_s = rit->t;
-                break;
-            }
-        }
-    }
-
     // ---- 巡航段统计 ----
     if (n_cruise > 0) {
         pa.cruise_avg_alpha_deg = (sum_alpha / n_cruise);
@@ -242,18 +209,7 @@ std::vector<SweepResult> sweepMass(double m0_min, double m0_max, double step,
 // 输出: 基准工况分析打印
 // ---------------------------------------------------------------------------
 void printPhaseAnalysis(const PhaseAnalysis& pa) {
-    std::cout << "\n";
     std::cout << "  === 全弹道气动和动力表现分析 (基准工况 C-1) ===\n\n";
-
-    std::cout << "  --- 助推段 ---\n";
-    std::cout << "    助推时间:       " << std::fixed << std::setprecision(1)
-              << pa.boost_time_s << " s\n";
-    std::cout << "    助推段末速度:   " << std::setprecision(1)
-              << pa.boost_end_V_ms << " m/s  ("
-              << std::setprecision(2) << pa.boost_end_V_ms / 343.0 << " Ma)\n";
-    std::cout << "    最大加速度:     " << std::setprecision(2)
-              << pa.boost_max_accel_g << " g\n";
-
     std::cout << "\n  --- 巡航段 ---\n";
     std::cout << "    平均配平攻角:   " << std::setprecision(2)
               << pa.cruise_avg_alpha_deg << " deg\n";
@@ -300,7 +256,32 @@ void writeSweepCSV(const std::string& filename,
     ofs << param_header << ",range_km,flight_time_min,fuel_consumed_kg,avg_LD,avg_sfc_hr\n";
 
     for (const auto& sr : results) {
-        ofs << std::fixed << std::setprecision(3) << sr.param_value << ","
+        // 解析 param_header，按列名取字段
+        std::stringstream ss(param_header);
+        std::string col;
+        bool first = true;
+        
+        while (std::getline(ss, col, ',')) {
+            // trim
+            auto l = col.find_first_not_of(" \t");
+            auto r = col.find_last_not_of(" \t");
+            col = (l == std::string::npos) ? "" : col.substr(l, r - l + 1);
+            
+            // 只有当不是第一列时，才在前面加逗号
+            if (!first) ofs << ",";
+            first = false;
+
+            if (col == "Ma" || col == "altitude_m" || col == "mass_kg") {
+                ofs << std::fixed << std::setprecision(3) << sr.param_value;
+            } else if (col == "V_m_s") {
+                ofs << std::fixed << std::setprecision(2) << sr.V_cruise_ms;
+            } else {
+                ofs << "";  // 未知列名，留空
+            }
+        }
+        
+        // 动态列输出完毕后，输出后面的固定列，注意这里要加逗号分隔
+        ofs << "," 
             << std::setprecision(2) << sr.range_km << ","
             << std::setprecision(2) << sr.flight_time_min << ","
             << std::setprecision(1) << sr.fuel_consumed_kg << ","
