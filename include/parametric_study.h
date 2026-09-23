@@ -32,11 +32,7 @@ struct SweepResult {
 // 基准工况全弹道表现分析
 // ---------------------------------------------------------------------------
 struct PhaseAnalysis {
-    // 助推段
-    double boost_time_s;       // 助推时间 [s]
-    double boost_end_V_ms;     // 助推段末速度 [m/s]
-    double boost_max_accel_g;  // 最大加速度 [g]
-
+    // 助推段已删除
     // 巡航段
     double cruise_avg_alpha_deg;// 平均配平攻角 [deg]
     double cruise_avg_LD;      // 平均升阻比
