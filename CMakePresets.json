@@ -1,0 +1,24 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 14,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "mingw64",
+      "displayName": "MinGW64 (GCC)",
+      "description": "使用 MinGW-w64 GCC 编译器与 MinGW Makefiles 生成器构建 (默认)",
+      "generator": "MinGW Makefiles",
+      "binaryDir": "${sourceDir}/build"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "mingw64",
+      "configurePreset": "mingw64",
+      "jobs": 0
+    }
+  ]
+}
