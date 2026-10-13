@@ -9,7 +9,7 @@
 
 TrajectoryParams defaultTrajectoryParams() {
     return {config::CRUISE_ALT_SEA, config::CRUISE_MACH,
-            config::MASS_INITIAL, config::MASS_FUEL, 0.0};
+            config::MASS_LAUNCH, config::MASS_FUEL, 0.0};
 }
 
 TrajectoryRecord evaluateTrajectory(const StateVec& state, double t,
@@ -20,7 +20,7 @@ TrajectoryRecord evaluateTrajectory(const StateVec& state, double t,
     const auto atm = calcAtmosphere(h);
     const double Ma = V / atm.a;
     const double q = 0.5 * atm.rho * V * V;
-    const double phase_mass = state[IDX_M] + config::MASS_INITIAL - params.initial_mass;
+    const double phase_mass = state[IDX_M] + config::MASS_LAUNCH - params.initial_mass;
     const auto prop = calcPropulsion(t, h, V, Ma, phase_mass);
     const bool boost = prop.phase == FlightPhase::BOOST;
     double alpha = params.cruise_alpha;
@@ -59,7 +59,7 @@ StateVec trajectoryDerivatives(const StateVec& state, double t,
     const double V = std::max(state[IDX_V], 1e-6);
     const double theta = state[IDX_THETA];
     const double m = state[IDX_M];
-    const double phase_mass = m + config::MASS_INITIAL - params.initial_mass;
+    const double phase_mass = m + config::MASS_LAUNCH - params.initial_mass;
     const auto prop = calcPropulsion(t, std::max(state[IDX_Y], 0.0), V, rec.Ma, phase_mass);
     return {(rec.T * std::cos(alpha) - rec.D) / m - config::g0 * std::sin(theta),
             (rec.T * std::sin(alpha) + rec.L - m * config::g0 * std::cos(theta)) / (m * V),
@@ -76,7 +76,7 @@ bool checkTermination(const StateVec& state, double t, const TrajectoryParams& p
     if (t >= config::MAX_SIM_TIME || state[IDX_Y] < 0.0 || state[IDX_V] <= 0.0
         || state[IDX_M] <= 0.0) return true;
     if (state[IDX_Y] == 0.0 && state[IDX_THETA] < 0.0) return true;
-    const double phase_mass = state[IDX_M] + config::MASS_INITIAL - params.initial_mass;
+    const double phase_mass = state[IDX_M] + config::MASS_LAUNCH - params.initial_mass;
     const bool cruise = t >= config::BOOSTER_BURN_TIME
         || getFlightPhase(t, phase_mass) != FlightPhase::BOOST;
     const double dry_mass = params.initial_mass - config::MASS_BOOSTER - initial_fuel_mass;
