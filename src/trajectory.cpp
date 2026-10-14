@@ -1,138 +1,84 @@
-// ============================================================================
-// trajectory.cpp -- 导弹质点弹道运动方程实现
-// 二维纵向质点运动方程:
-//   m * dV/dt     = T*cos(alpha) - D - m*g*sin(theta)
-//   m*V * dtheta/dt = T*sin(alpha) + L - m*g*cos(theta)
-//   dx/dt         = V * cos(theta)
-//   dy/dt         = V * sin(theta)
-//   dm/dt         = -massFlowRate
-// ============================================================================
-
 #include "trajectory.h"
 #include "config.h"
 #include "atmosphere.h"
 #include "aerodynamics.h"
 #include "propulsion.h"
-#include <cmath>
 #include <algorithm>
+#include <cmath>
+#include <stdexcept>
 
-// ---------------------------------------------------------------------------
-// 默认工况参数 (基准工况 C-1: 海上巡航)
-// ---------------------------------------------------------------------------
 TrajectoryParams defaultTrajectoryParams() {
-    TrajectoryParams p;
-    p.cruise_alt   = config::CRUISE_ALT_SEA; // 15 m
-    p.cruise_mach  = config::CRUISE_MACH;     // 0.72
-    p.initial_mass = config::MASS_LAUNCH;     // 1450 kg
-    p.fuel_mass    = config::MASS_FUEL;       // 450 kg
-    p.cruise_alpha = 0.0;                     // 自动计算配平攻角
-    return p;
+    return {config::CRUISE_ALT_SEA, config::CRUISE_MACH,
+            config::MASS_LAUNCH, config::MASS_FUEL, 0.0};
 }
 
-// ---------------------------------------------------------------------------
-// 右端函数: 计算状态向量的时间导数
-// ---------------------------------------------------------------------------
-StateVec trajectoryDerivatives(const StateVec& state, double t, const TrajectoryParams& params) {
-    double V     = state[IDX_V];
-    double theta = state[IDX_THETA];
-    double y     = state[IDX_Y];
-    double m     = state[IDX_M];
-
-    // 防止速度和质量出现非物理值
-    V = std::max(V, 1.0);
-    m = std::max(m, config::MASS_EMPTY);
-
-    // 大气参数
-    AtmosphereState atm = calcAtmosphere(std::max(y, 0.0));
-    double Ma = V / atm.a;
-
-    // 动压
-    double q = 0.5 * atm.rho * V * V;
-
-    // 飞行阶段
-    FlightPhase phase = getFlightPhase(t, m);
-
-    // 攻角确定
-    double alpha;
-    if (phase == FlightPhase::BOOST) {
-        // 助推段: 采用程序攻角 (爬升转弯)
-        // 简单策略: 前 1 s 保持 theta0, 之后线性转到巡航攻角
-        if (t < 1.0) {
-            alpha = 5.0 * config::DEG2RAD; // 初始拉起攻角
-        } else {
-            // 线性过渡到较小攻角
-            double ratio = (t - 1.0) / (config::BOOSTER_BURN_TIME - 1.0);
-            ratio = std::min(ratio, 1.0);
-            alpha = (5.0 * (1.0 - ratio) + 2.0 * ratio) * config::DEG2RAD;
-        }
-    } else {
-        // 巡航段
-        if (params.cruise_alpha > 0.0) {
-            alpha = params.cruise_alpha;
-        } else {
-            // 自动计算配平攻角: L = m*g
-            double weight = m * config::g0;
-            alpha = calcTrimAlpha(Ma, q, weight);
-            // 限制攻角范围
-            alpha = std::clamp(alpha, -2.0 * config::DEG2RAD, 12.0 * config::DEG2RAD);
+TrajectoryRecord evaluateTrajectory(const StateVec& state, double t,
+                                    const TrajectoryParams& params) {
+    const double V = std::max(state[IDX_V], 1e-6);
+    const double m = std::max(state[IDX_M], 1e-6);
+    const double h = std::max(state[IDX_Y], 0.0);
+    const auto atm = calcAtmosphere(h);
+    const double Ma = V / atm.a;
+    const double q = 0.5 * atm.rho * V * V;
+    const double phase_mass = state[IDX_M] + config::MASS_LAUNCH - params.initial_mass;
+    const auto prop = calcPropulsion(t, h, V, Ma, phase_mass);
+    const bool boost = prop.phase == FlightPhase::BOOST;
+    double alpha = params.cruise_alpha;
+    if (boost) {
+        const double ratio = std::clamp((t - 1.0) / (config::BOOSTER_BURN_TIME - 1.0), 0.0, 1.0);
+        alpha = (5.0 - 3.0 * ratio) * config::DEG2RAD;
+    } else if (alpha == 0.0) {
+        const double target_theta = std::clamp((params.cruise_alt - state[IDX_Y]) / (10.0 * V),
+                                               -10.0 * config::DEG2RAD, 10.0 * config::DEG2RAD);
+        const double theta_rate = (target_theta - state[IDX_THETA]) / 3.0;
+        const double normal_force = m * (config::g0 * std::cos(state[IDX_THETA]) + V * theta_rate);
+        double low = -2.0 * config::DEG2RAD;
+        double high = 12.0 * config::DEG2RAD;
+        alpha = std::clamp(calcTrimAlpha(Ma, q, normal_force), low, high);
+        for (int i = 0; i < 35; ++i) {
+            const auto aero = calcAerodynamics(alpha, Ma, q);
+            if (aero.L + prop.thrust * std::sin(alpha) < normal_force) low = alpha;
+            else high = alpha;
+            alpha = 0.5 * (low + high);
         }
     }
-
-    // 气动力
-    AeroResult aero = calcAerodynamics(alpha, Ma, q);
-    double L = aero.L;
-    double D = aero.D;
-
-    // 推力
-    PropulsionResult prop = calcPropulsion(t, y, V, Ma, m);
-    double T = prop.thrust;
-    double m_dot = prop.massFlowRate;
-
-    // 助推器壳体分离在 integrator.cpp 中处理 (质量跳变)
-
-    // ---- 运动方程右端函数 ----
-    StateVec dstate;
-
-    // dV/dt = [T*cos(alpha) - D - m*g*sin(theta)] / m
-    dstate[IDX_V] = (T * std::cos(alpha) - D - m * config::g0 * std::sin(theta)) / m;
-
-    // dtheta/dt = [T*sin(alpha) + L - m*g*cos(theta)] / (m*V)
-    dstate[IDX_THETA] = (T * std::sin(alpha) + L - m * config::g0 * std::cos(theta)) / (m * V);
-
-    // dx/dt = V * cos(theta)
-    dstate[IDX_X] = V * std::cos(theta);
-
-    // dy/dt = V * sin(theta)
-    dstate[IDX_Y] = V * std::sin(theta);
-
-    // dm/dt = -m_dot
-    dstate[IDX_M] = -m_dot;
-
-    return dstate;
+    const auto aero = calcAerodynamics(alpha, Ma, q);
+    return {t, state[IDX_V], state[IDX_THETA] * config::RAD2DEG,
+            state[IDX_X], state[IDX_Y], state[IDX_M], aero.L, aero.D,
+            prop.thrust, Ma, alpha * config::RAD2DEG, boost ? 0.0 : 1.0};
 }
 
-// ---------------------------------------------------------------------------
-// 终止条件检查
-// ---------------------------------------------------------------------------
+StateVec trajectoryDerivatives(const StateVec& state, double t,
+                               const TrajectoryParams& params) {
+    for (double value : state) {
+        if (!std::isfinite(value)) throw std::invalid_argument("Non-finite trajectory state");
+    }
+    if (state[IDX_M] <= 0.0) throw std::invalid_argument("Mass must be positive");
+    const auto rec = evaluateTrajectory(state, t, params);
+    const double alpha = rec.alpha * config::DEG2RAD;
+    const double V = std::max(state[IDX_V], 1e-6);
+    const double theta = state[IDX_THETA];
+    const double m = state[IDX_M];
+    const double phase_mass = m + config::MASS_LAUNCH - params.initial_mass;
+    const auto prop = calcPropulsion(t, std::max(state[IDX_Y], 0.0), V, rec.Ma, phase_mass);
+    return {(rec.T * std::cos(alpha) - rec.D) / m - config::g0 * std::sin(theta),
+            (rec.T * std::sin(alpha) + rec.L - m * config::g0 * std::cos(theta)) / (m * V),
+            state[IDX_V] * std::cos(theta), state[IDX_V] * std::sin(theta),
+            -prop.massFlowRate};
+}
+
 bool checkTermination(const StateVec& state, double t, const TrajectoryParams& params,
                       double initial_fuel_mass) {
-    double y = state[IDX_Y];
-    double m = state[IDX_M];
-
-    // 条件 1: 超时
-    if (t >= config::MAX_SIM_TIME) return true;
-
-    // 条件 2: 触地 (高度 < 0)
-    if (y < 0.0) return true;
-
-    // 条件 3: 巡航段燃油耗尽
-    // 助推段结束后，导弹质量 = 发射质量 - 助推器(含壳体) - 已消耗燃油
-    double mass_without_booster = config::MASS_LAUNCH - config::MASS_BOOSTER;
-    double fuel_consumed_cruise = mass_without_booster - m;
-
-    if (t > config::BOOSTER_BURN_TIME && fuel_consumed_cruise >= params.fuel_mass) {
-        return true;
+    if (!std::isfinite(t)) return true;
+    for (double value : state) {
+        if (!std::isfinite(value)) return true;
     }
-
-    return false;
+    if (t >= config::MAX_SIM_TIME || state[IDX_Y] < 0.0 || state[IDX_V] <= 0.0
+        || state[IDX_M] <= 0.0) return true;
+    if (state[IDX_Y] == 0.0 && state[IDX_THETA] < 0.0) return true;
+    const double phase_mass = state[IDX_M] + config::MASS_LAUNCH - params.initial_mass;
+    const bool cruise = t >= config::BOOSTER_BURN_TIME
+        || getFlightPhase(t, phase_mass) != FlightPhase::BOOST;
+    const double dry_mass = params.initial_mass - config::MASS_BOOSTER - initial_fuel_mass;
+    return cruise && state[IDX_M] <= dry_mass + 1e-8;
 }
