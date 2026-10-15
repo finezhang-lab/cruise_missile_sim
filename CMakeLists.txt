@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.14)
 project(CruiseMissileSim LANGUAGES CXX)
 
+# 默认生成器: MinGW64 (MinGW Makefiles)。见 CMakePresets.json 的 mingw64 preset。
+#   命令行构建:  cmake --preset mingw64 && cmake --build build
+#   VSCode:      使用 .vscode/settings.json 中的 cmake.generator 设置
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

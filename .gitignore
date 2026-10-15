@@ -1,0 +1,29 @@
+# 构建产物
+build/
+*.exe
+*.o
+*.obj
+*.out
+*.a
+*.so
+*.dll
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# IDE / 编辑器
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# 系统文件
+.DS_Store
+Thumbs.db
