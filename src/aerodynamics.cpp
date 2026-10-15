@@ -146,7 +146,10 @@ double calcInducedDragFactor(double Ma) {
 //   - 底部阻力: 钝底后部压差阻力 (基于底面积折算)
 //   - 跨声速波阻: 超过阻力发散 Ma 后按 (M-M_dd)³ 快速增长
 // ---------------------------------------------------------------------------
-double calcCD0(double Ma, const AtmosphereState& atm) {
+double calcCD0(double Ma) {
+    // 团队接口 calcCD0(Ma) 不含大气参数, 此处以巡航高度的大气状态计算雷诺数
+    AtmosphereState atm = calcAtmosphere(config::CRUISE_ALT_SEA);
+
     double V   = Ma * atm.a;
     double mu  = sutherlandMu(atm.T);
     double Re  = atm.rho * V * L_BODY / mu;   // 以弹体长为特征长度的雷诺数
@@ -175,7 +178,7 @@ double calcCD0(double Ma, const AtmosphereState& atm) {
 // ---------------------------------------------------------------------------
 // 主函数: 计算气动力
 // ---------------------------------------------------------------------------
-AeroResult calcAerodynamics(double alpha, double Ma, const AtmosphereState& atm) {
+AeroResult calcAerodynamics(double alpha, double Ma, double q) {
     AeroResult res;
 
     double cl_alpha = calcCLalpha(Ma);
@@ -192,13 +195,11 @@ AeroResult calcAerodynamics(double alpha, double Ma, const AtmosphereState& atm)
     }
 
     // ---- 阻力: 抛物极线 CD = CD0 + K·CL² (升力线理论) ----
-    double cd0 = calcCD0(Ma, atm);
+    double cd0 = calcCD0(Ma);
     double K   = calcInducedDragFactor(Ma);
     res.CD = cd0 + K * res.CL * res.CL;
 
     // ---- 力与升阻比 ----
-    double V = Ma * atm.a;
-    double q = 0.5 * atm.rho * V * V;
     res.L  = res.CL * q * S_WING;
     res.D  = res.CD * q * S_WING;
     res.LD = (res.D > 1e-10) ? (res.L / res.D) : 0.0;
@@ -263,11 +264,14 @@ void writeAeroPolarCSV(const std::string& filename, double Ma,
         return;
     }
 
+    double V = Ma * atm.a;
+    double q = 0.5 * atm.rho * V * V;
+
     ofs << "alpha_deg,CL,CD,LD,L_N,D_N\n";
     ofs << std::fixed;
     for (double a_deg = alphaMinDeg; a_deg <= alphaMaxDeg + 1e-9;
          a_deg += alphaStepDeg) {
-        AeroResult res = calcAerodynamics(a_deg * config::DEG2RAD, Ma, atm);
+        AeroResult res = calcAerodynamics(a_deg * config::DEG2RAD, Ma, q);
         ofs << std::setprecision(2) << a_deg << ","
             << std::setprecision(6) << res.CL << ","
             << std::setprecision(6) << res.CD << ","
@@ -457,8 +461,10 @@ void writeAeroExcelCSV(const std::string& filename, double Ma, double h,
     ofs << "工况,马赫数 Ma = " << std::setprecision(3) << Ma
         << ",巡航高度 h = " << std::setprecision(1) << h << " m\n";
     ofs << "攻角 α (°),升力系数 CL,阻力系数 CD,升阻比 L/D,升力 L (N),阻力 D (N)\n";
+    double V = Ma * atm.a;
+    double q = 0.5 * atm.rho * V * V;
     for (double a_deg = -4.0; a_deg <= 16.0 + 1e-9; a_deg += 0.5) {
-        AeroResult res = calcAerodynamics(a_deg * config::DEG2RAD, Ma, atm);
+        AeroResult res = calcAerodynamics(a_deg * config::DEG2RAD, Ma, q);
         ofs << std::setprecision(2) << a_deg << ","
             << std::setprecision(6) << res.CL << ","
             << std::setprecision(6) << res.CD << ","
@@ -673,7 +679,7 @@ int main(int argc, char** argv) {
               << " m/s, T = " << atm.T << " K, p = " << atm.p << " Pa\n";
 
     double cl_alpha = calcCLalpha(Ma);
-    double cd0      = calcCD0(Ma, atm);
+    double cd0      = calcCD0(Ma);
     double K        = calcInducedDragFactor(Ma);
     std::cout << "关键气动参数: CL_alpha = " << cl_alpha << " /rad, CD0 = "
               << cd0 << ", K = " << K << "\n";
