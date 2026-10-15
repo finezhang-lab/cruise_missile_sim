@@ -51,6 +51,16 @@ struct TrajectoryParams {
     double cruise_alpha;   // 巡航攻角 [rad] (若为 0 则自动计算配平攻角)
 };
 
+// 飞控与推力计算结果
+struct FlightControlResult {
+    double alpha;        // 攻角 [rad]
+    double thrust;       // 实际输出推力 [N]
+    double massFlowRate; // 实际质量流率 [kg/s]
+};
+
+// 综合飞控计算: 包含助推段程序转弯、巡航段高度保持闭环及自动油门推力调节
+FlightControlResult calcFlightControl(const StateVec& state, double t, const TrajectoryParams& params);
+
 // 计算状态向量的时间导数 (右端函数)
 // state: 当前状态 [V, theta, x, y, m]
 // t: 当前时间 [s]

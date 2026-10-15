@@ -85,36 +85,18 @@ static TrajectoryRecord buildRecord(const StateVec& state, double t,
     rec.Ma = state[IDX_V] / atm.a;
     double q = 0.5 * atm.rho * state[IDX_V] * state[IDX_V];
 
-    FlightPhase phase = getFlightPhase(t, state[IDX_M]);
+    FlightPhase phase = (state[IDX_V] > 150.0 || state[IDX_M] < params.initial_mass - 1.0)
+                      ? FlightPhase::CRUISE : getFlightPhase(t, state[IDX_M]);
     rec.phase = (phase == FlightPhase::BOOST) ? 0.0 : 1.0;
 
-    // 攻角
-    double alpha;
-    if (phase == FlightPhase::BOOST) {
-        if (t < 1.0) {
-            alpha = 5.0 * config::DEG2RAD;
-        } else {
-            double ratio = (t - 1.0) / (config::BOOSTER_BURN_TIME - 1.0);
-            ratio = std::min(ratio, 1.0);
-            alpha = (5.0 * (1.0 - ratio) + 2.0 * ratio) * config::DEG2RAD;
-        }
-    } else {
-        if (params.cruise_alpha > 0.0) {
-            alpha = params.cruise_alpha;
-        } else {
-            double weight = state[IDX_M] * config::g0;
-            alpha = calcTrimAlpha(rec.Ma, q, weight);
-            alpha = std::clamp(alpha, -2.0 * config::DEG2RAD, 12.0 * config::DEG2RAD);
-        }
-    }
-    rec.alpha = alpha * config::RAD2DEG;
+    // 使用统一的飞控与推力计算逻辑，确保记录输出与积分步进严格一致
+    FlightControlResult fc = calcFlightControl(state, t, params);
+    rec.alpha = fc.alpha * config::RAD2DEG;
+    rec.T     = fc.thrust;
 
-    AeroResult aero = calcAerodynamics(alpha, rec.Ma, q);
+    AeroResult aero = calcAerodynamics(fc.alpha, rec.Ma, q);
     rec.L = aero.L;
     rec.D = aero.D;
-
-    PropulsionResult prop = calcPropulsion(t, state[IDX_Y], state[IDX_V], rec.Ma, state[IDX_M]);
-    rec.T = prop.thrust;
 
     return rec;
 }
@@ -134,9 +116,8 @@ std::vector<TrajectoryRecord> integrateTrajectory(
     StateVec state = initial_state;
     double t = t_start;
     double fuel_at_cruise_start = params.fuel_mass;
-    // 若初始质量已接近助推器分离后质量，视为已分离
-    double mass_after_boost = config::MASS_LAUNCH - config::MASS_BOOSTER;
-    bool booster_separated = (state[IDX_M] <= mass_after_boost + 1.0);
+    // 若初始质量已无助推器，或初速已处于巡航高亚声速，视为已分离
+    bool booster_separated = (state[IDX_M] < params.initial_mass - 1.0) || (state[IDX_V] > 150.0);
 
     // 记录初始状态
     records.push_back(buildRecord(state, t, params));
@@ -144,8 +125,8 @@ std::vector<TrajectoryRecord> integrateTrajectory(
     int cruise_step_count = 0; // 巡航段记录计数器
 
     while (!checkTermination(state, t, params, fuel_at_cruise_start)) {
-        // 根据飞行阶段选择步长
-        FlightPhase phase = getFlightPhase(t, state[IDX_M]);
+        // 根据飞行阶段选择步长 (一旦处于巡航段，不可逆回助推段)
+        FlightPhase phase = booster_separated ? FlightPhase::CRUISE : getFlightPhase(t, state[IDX_M]);
         double dt = (phase == FlightPhase::BOOST) ? config::DT_BOOST : config::DT_CRUISE;
 
         // 助推器分离: 在助推段结束瞬间抛掉壳体质量

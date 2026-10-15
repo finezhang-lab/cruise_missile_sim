@@ -237,6 +237,19 @@ static void runAndSaveCase(const std::string& caseName,
 }
 
 // ---------------------------------------------------------------------------
+// 辅助: 运行全弹道工况 (含助推爬升/分离/巡航) → 写 CSV → 打印摘要
+// ---------------------------------------------------------------------------
+static void runAndSaveFullCase(const std::string& caseName,
+                               const TrajectoryParams& params)
+{
+    auto records = runFullTrajectoryCase(params);
+    std::string outdir = "output";
+    ensureDirectory(outdir);
+    writeTrajectoryCSV(outdir + "/trajectory_" + caseName + ".csv", records);
+    printTrajectorySummary(caseName, records);
+}
+
+// ---------------------------------------------------------------------------
 // 阶段三/四: 弹道计算 (C 系列工况)
 // ---------------------------------------------------------------------------
 static void runTrajectoryCases() {
@@ -244,6 +257,9 @@ static void runTrajectoryCases() {
     std::cout << "============================================================\n";
     std::cout << "  阶段三/四: 弹道计算 (C 系列工况)\n";
     std::cout << "============================================================\n";
+
+    // C-0: 助推-巡航全弹道工况 (从发射架起飞，经历助推、分离、平飞加速与巡航)
+    runAndSaveFullCase("C0_full_boost_cruise", defaultTrajectoryParams());
 
     // C-1: 基准工况 (海上巡航)
     runAndSaveCase("C1_baseline_sea", defaultTrajectoryParams());

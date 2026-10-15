@@ -20,7 +20,7 @@
 #include <algorithm>
 
 // ---------------------------------------------------------------------------
-// 运行单个弹道工况 (仅积分，不写文件)
+// 运行单个弹道工况 (仅积分，不写文件，默认从巡航基准初态起飞)
 // ---------------------------------------------------------------------------
 std::vector<TrajectoryRecord> runCase(const TrajectoryParams& params) {
     StateVec x0{};
@@ -30,7 +30,24 @@ std::vector<TrajectoryRecord> runCase(const TrajectoryParams& params) {
     x0[IDX_THETA] = 0.0;                                // 水平飞行
     x0[IDX_X]     = 0.0;
     x0[IDX_Y]     = params.cruise_alt;                  // 直接到达巡航高度
-    x0[IDX_M]     = config::MASS_LAUNCH - config::MASS_BOOSTER;  // 1150 kg
+    double mass_without_booster = config::MASS_LAUNCH - config::MASS_BOOSTER;
+    x0[IDX_M]     = (params.initial_mass > mass_without_booster)
+                  ? (params.initial_mass - config::MASS_BOOSTER)
+                  : params.initial_mass;
+
+    return integrateTrajectory(x0, 0.0, params, trajectoryDerivatives);
+}
+
+// ---------------------------------------------------------------------------
+// 运行全弹道工况 (从发射架起飞，含助推爬升转弯、助推分离抛壳、巡航平飞加速与巡航段)
+// ---------------------------------------------------------------------------
+std::vector<TrajectoryRecord> runFullTrajectoryCase(const TrajectoryParams& params) {
+    StateVec x0{};
+    x0[IDX_V]     = 25.0;                          // 燃气弹射出筒初速 [m/s]
+    x0[IDX_THETA] = 30.0 * config::DEG2RAD;        // 倾斜发射架初始仰角 30°
+    x0[IDX_X]     = 0.0;
+    x0[IDX_Y]     = std::max(params.cruise_alt, 15.0); // 发射架高度 (默认 15m)
+    x0[IDX_M]     = params.initial_mass;           // 发射总质量 (含助推器 1450 kg)
 
     return integrateTrajectory(x0, 0.0, params, trajectoryDerivatives);
 }
@@ -100,7 +117,11 @@ static SweepResult extractSweepResult(double param_value,
     const auto& last = records.back();
     sr.range_km        = last.x / 1000.0;
     sr.flight_time_min = last.t / 60.0;
-    sr.fuel_consumed_kg = (config::MASS_LAUNCH - config::MASS_BOOSTER) - last.m;
+    double initial_cruise_m = records.front().m;
+    if (initial_cruise_m > (config::MASS_LAUNCH - config::MASS_BOOSTER + 1.0)) {
+        initial_cruise_m -= config::MASS_BOOSTER;
+    }
+    sr.fuel_consumed_kg = initial_cruise_m - last.m;
 
     // 巡航段平均 L/D 和 sfc
     int n_cruise = 0;

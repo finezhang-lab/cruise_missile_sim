@@ -30,6 +30,93 @@ TrajectoryParams defaultTrajectoryParams() {
 }
 
 // ---------------------------------------------------------------------------
+// 综合飞控计算: 包含助推段程序转弯、巡航段高度保持闭环及自动油门推力调节
+// ---------------------------------------------------------------------------
+FlightControlResult calcFlightControl(const StateVec& state, double t, const TrajectoryParams& params) {
+    FlightControlResult res{};
+    double V     = std::max(state[IDX_V], 1.0);
+    double theta = state[IDX_THETA];
+    double y     = state[IDX_Y];
+    double m     = std::max(state[IDX_M], config::MASS_EMPTY);
+
+    AtmosphereState atm = calcAtmosphere(std::max(y, 0.0));
+    double Ma = V / atm.a;
+    double q  = 0.5 * atm.rho * V * V;
+
+    // 飞行阶段判断 (初速处于巡航高亚声速或质量已扣除助推器，均为巡航段)
+    FlightPhase phase = (V > 150.0 || m < params.initial_mass - 1.0)
+                      ? FlightPhase::CRUISE : getFlightPhase(t, m);
+
+    // 1. 攻角控制 (姿态与高度导引律)
+    double alpha = 0.0;
+    if (phase == FlightPhase::BOOST) {
+        // 助推段: 采用程序转弯导引
+        // 发射仰角约 30 deg，助推时间内平滑引导至接近水平 (0 deg)
+        const double theta_initial = 30.0 * config::DEG2RAD;
+        double ratio = std::clamp(t / config::BOOSTER_BURN_TIME, 0.0, 1.0);
+        double theta_target = theta_initial * (1.0 - ratio);
+
+        // 姿态闭环: 攻角由目标倾角偏差控制，保证法向力克服低速重力下沉
+        double alpha_cmd = 1.5 * (theta_target - theta) + 3.0 * config::DEG2RAD;
+        alpha = std::clamp(alpha_cmd, -1.0 * config::DEG2RAD, 10.0 * config::DEG2RAD);
+    } else {
+        // 巡航段 / 过渡段
+        if (params.cruise_alpha > 0.0) {
+            alpha = params.cruise_alpha;
+        } else {
+            // 自动高度捕获与高度保持闭环
+            // 1) 静态重力配平攻角 (L = m*g)
+            double weight = m * config::g0;
+            double alpha_trim = calcTrimAlpha(Ma, q, weight);
+
+            // 2) 高度捕获导引: 目标弹道倾角 theta_cmd
+            double h_target = params.cruise_alt;
+            double h_err = h_target - y;
+            double h_dot = V * std::sin(theta);
+
+            // 限制俯冲角/爬升角在安全范围内 [-2.5 deg, +4.0 deg]
+            double theta_cmd = std::clamp(0.005 * h_err - 0.02 * (h_dot / std::max(V, 50.0)),
+                                          -2.5 * config::DEG2RAD, 4.0 * config::DEG2RAD);
+
+            // 3) 攻角控制指令: 跟踪 theta_cmd
+            // 攻角上限放宽至 11.0 deg (失速角 14 deg)，保证低速 (90~120 m/s) 过渡段升力充足
+            double alpha_cmd = alpha_trim + 1.5 * (theta_cmd - theta);
+            alpha = std::clamp(alpha_cmd, -1.0 * config::DEG2RAD, 11.0 * config::DEG2RAD);
+        }
+    }
+    res.alpha = alpha;
+
+    // 2. 气动力初算 (用于推力平衡)
+    AeroResult aero = calcAerodynamics(alpha, Ma, q);
+
+    // 3. 推力与油门调节 (Auto-throttle)
+    PropulsionResult prop = calcPropulsion(t, y, V, Ma, m);
+    double T     = prop.thrust;
+    double m_dot = prop.massFlowRate;
+
+    if (phase == FlightPhase::CRUISE) {
+        double V_target = params.cruise_mach * atm.a;
+        if (V >= V_target - 0.5) {
+            // 已达巡航速度: 自动油门闭环，推力平衡气动阻力与重力分量，维持巡航马赫数
+            double T_req = aero.D + m * config::g0 * std::sin(theta) + 15.0 * (V_target - V);
+            double T_max = prop.thrust;
+            double T_min = 0.2 * T_max;
+            T = std::clamp(T_req, T_min, T_max);
+
+            // 节流状态下的燃油消耗率等比例折算: m_dot = sfc * T
+            if (T_max > 1.0) {
+                m_dot = prop.massFlowRate * (T / T_max);
+            }
+        }
+        // 若 V < V_target - 0.5，发动机维持全推力加速
+    }
+
+    res.thrust = T;
+    res.massFlowRate = m_dot;
+    return res;
+}
+
+// ---------------------------------------------------------------------------
 // 右端函数: 计算状态向量的时间导数
 // ---------------------------------------------------------------------------
 StateVec trajectoryDerivatives(const StateVec& state, double t, const TrajectoryParams& params) {
@@ -45,48 +132,18 @@ StateVec trajectoryDerivatives(const StateVec& state, double t, const Trajectory
     // 大气参数
     AtmosphereState atm = calcAtmosphere(std::max(y, 0.0));
     double Ma = V / atm.a;
+    double q  = 0.5 * atm.rho * V * V;
 
-    // 动压
-    double q = 0.5 * atm.rho * V * V;
-
-    // 飞行阶段
-    FlightPhase phase = getFlightPhase(t, m);
-
-    // 攻角确定
-    double alpha;
-    if (phase == FlightPhase::BOOST) {
-        // 助推段: 采用程序攻角 (爬升转弯)
-        // 简单策略: 前 1 s 保持 theta0, 之后线性转到巡航攻角
-        if (t < 1.0) {
-            alpha = 5.0 * config::DEG2RAD; // 初始拉起攻角
-        } else {
-            // 线性过渡到较小攻角
-            double ratio = (t - 1.0) / (config::BOOSTER_BURN_TIME - 1.0);
-            ratio = std::min(ratio, 1.0);
-            alpha = (5.0 * (1.0 - ratio) + 2.0 * ratio) * config::DEG2RAD;
-        }
-    } else {
-        // 巡航段
-        if (params.cruise_alpha > 0.0) {
-            alpha = params.cruise_alpha;
-        } else {
-            // 自动计算配平攻角: L = m*g
-            double weight = m * config::g0;
-            alpha = calcTrimAlpha(Ma, q, weight);
-            // 限制攻角范围
-            alpha = std::clamp(alpha, -2.0 * config::DEG2RAD, 12.0 * config::DEG2RAD);
-        }
-    }
+    // 飞控与推力计算
+    FlightControlResult fc = calcFlightControl(state, t, params);
+    double alpha = fc.alpha;
+    double T     = fc.thrust;
+    double m_dot = fc.massFlowRate;
 
     // 气动力
     AeroResult aero = calcAerodynamics(alpha, Ma, q);
     double L = aero.L;
     double D = aero.D;
-
-    // 推力
-    PropulsionResult prop = calcPropulsion(t, y, V, Ma, m);
-    double T = prop.thrust;
-    double m_dot = prop.massFlowRate;
 
     // 助推器壳体分离在 integrator.cpp 中处理 (质量跳变)
 
@@ -119,18 +176,22 @@ bool checkTermination(const StateVec& state, double t, const TrajectoryParams& p
     double y = state[IDX_Y];
     double m = state[IDX_M];
 
-    // 条件 1: 超时
-    if (t >= config::MAX_SIM_TIME) return true;
+    // 条件 1: 超时保护 (放宽至 30000s 约 8.3h，避免低速长航时或大载油量工况被数值提前截断)
+    double max_sim_time = 30000.0;
+    if (t >= max_sim_time) return true;
 
-    // 条件 2: 触地 (高度 < 0)
-    if (y < 0.0) return true;
+    // 条件 2: 触地 (高度 < 0)，给予发射初期 0.1s 离架容差
+    if (y < 0.0 && t > 0.1) return true;
 
     // 条件 3: 巡航段燃油耗尽
-    // 助推段结束后，导弹质量 = 发射质量 - 助推器(含壳体) - 已消耗燃油
+    // 动态解算真实的巡航起点总质量，杜绝超额质量扫描时的死锁
     double mass_without_booster = config::MASS_LAUNCH - config::MASS_BOOSTER;
-    double fuel_consumed_cruise = mass_without_booster - m;
+    double initial_cruise_mass  = (params.initial_mass > mass_without_booster)
+                                ? (params.initial_mass - config::MASS_BOOSTER)
+                                : params.initial_mass;
+    double fuel_consumed_cruise = initial_cruise_mass - m;
 
-    if (t > config::BOOSTER_BURN_TIME && fuel_consumed_cruise >= params.fuel_mass) {
+    if (t > config::BOOSTER_BURN_TIME && fuel_consumed_cruise >= (params.fuel_mass - 1e-4)) {
         return true;
     }
 
