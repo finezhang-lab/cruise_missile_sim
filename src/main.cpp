@@ -261,6 +261,9 @@ static void runTrajectoryCases() {
     // C-0: 助推-巡航全弹道工况 (从发射架起飞，经历助推、分离、平飞加速与巡航)
     runAndSaveFullCase("C0_full_boost_cruise", defaultTrajectoryParams());
 
+    // C-0-typical: 马老师优化建议典型弹道 (爬升至5km -> 高空平飞 -> 俯冲下滑 -> 15m掠海平飞)
+    runAndSaveFullCase("C0_typical_5k_to_15m", typicalTrajectoryParams());
+
     // C-1: 基准工况 (海上巡航)
     runAndSaveCase("C1_baseline_sea", defaultTrajectoryParams());
 
@@ -393,6 +396,13 @@ int main(int argc, char* argv[]) {
 
     // 根据命令行参数选择运行模式
     std::string mode = (argc > 1) ? argv[1] : "all";
+
+    if (mode == "all" || mode == "typical") {
+        std::cout << "\n============================================================\n";
+        std::cout << "  运行马老师优化建议典型弹道 (5km爬升平飞 -> 俯冲 -> 15m掠海平飞)\n";
+        std::cout << "============================================================\n";
+        runAndSaveFullCase("C0_typical_5k_to_15m", typicalTrajectoryParams());
+    }
 
     if (mode == "all" || mode == "aero") {
         runAeroAnalysis();

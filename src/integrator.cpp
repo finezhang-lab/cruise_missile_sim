@@ -85,9 +85,29 @@ static TrajectoryRecord buildRecord(const StateVec& state, double t,
     rec.Ma = state[IDX_V] / atm.a;
     double q = 0.5 * atm.rho * state[IDX_V] * state[IDX_V];
 
-    FlightPhase phase = (state[IDX_V] > 150.0 || state[IDX_M] < params.initial_mass - 1.0)
+    double mass_without_booster = config::MASS_LAUNCH - config::MASS_BOOSTER;
+    FlightPhase phase = (state[IDX_V] > 150.0 || state[IDX_M] <= mass_without_booster + 1.0)
                       ? FlightPhase::CRUISE : getFlightPhase(t, state[IDX_M]);
-    rec.phase = (phase == FlightPhase::BOOST) ? 0.0 : 1.0;
+
+    if (params.enable_typical_profile) {
+        if (phase == FlightPhase::BOOST) {
+            rec.phase = 0.0; // 助推段
+        } else if (state[IDX_X] < params.high_cruise_dist) {
+            if (state[IDX_Y] < params.climb_target_alt - 100.0) {
+                rec.phase = 1.0; // 爬升段
+            } else {
+                rec.phase = 2.0; // 5000m 高空平飞段
+            }
+        } else {
+            if (state[IDX_Y] > params.sea_skim_alt + 30.0) {
+                rec.phase = 3.0; // 俯冲下滑段
+            } else {
+                rec.phase = 4.0; // 15m 超低空掠海平飞段
+            }
+        }
+    } else {
+        rec.phase = (phase == FlightPhase::BOOST) ? 0.0 : 1.0;
+    }
 
     // 使用统一的飞控与推力计算逻辑，确保记录输出与积分步进严格一致
     FlightControlResult fc = calcFlightControl(state, t, params);
@@ -117,7 +137,8 @@ std::vector<TrajectoryRecord> integrateTrajectory(
     double t = t_start;
     double fuel_at_cruise_start = params.fuel_mass;
     // 若初始质量已无助推器，或初速已处于巡航高亚声速，视为已分离
-    bool booster_separated = (state[IDX_M] < params.initial_mass - 1.0) || (state[IDX_V] > 150.0);
+    double mass_without_booster = config::MASS_LAUNCH - config::MASS_BOOSTER;
+    bool booster_separated = (state[IDX_M] <= mass_without_booster + 1.0) || (state[IDX_V] > 150.0);
 
     // 记录初始状态
     records.push_back(buildRecord(state, t, params));

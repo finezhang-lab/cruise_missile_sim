@@ -46,7 +46,8 @@ std::vector<TrajectoryRecord> runFullTrajectoryCase(const TrajectoryParams& para
     x0[IDX_V]     = 25.0;                          // 燃气弹射出筒初速 [m/s]
     x0[IDX_THETA] = 30.0 * config::DEG2RAD;        // 倾斜发射架初始仰角 30°
     x0[IDX_X]     = 0.0;
-    x0[IDX_Y]     = std::max(params.cruise_alt, 15.0); // 发射架高度 (默认 15m)
+    // 典型多阶段弹道固定从海面倾斜发射架起飞 (15m)，基准全弹道亦为 15m
+    x0[IDX_Y]     = params.enable_typical_profile ? 15.0 : std::max(params.cruise_alt, 15.0);
     x0[IDX_M]     = params.initial_mass;           // 发射总质量 (含助推器 1450 kg)
 
     return integrateTrajectory(x0, 0.0, params, trajectoryDerivatives);

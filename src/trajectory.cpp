@@ -26,6 +26,24 @@ TrajectoryParams defaultTrajectoryParams() {
     p.initial_mass = config::MASS_LAUNCH;     // 1450 kg
     p.fuel_mass    = config::MASS_FUEL;       // 450 kg
     p.cruise_alpha = 0.0;                     // 自动计算配平攻角
+    p.enable_typical_profile = false;
+    return p;
+}
+
+// ---------------------------------------------------------------------------
+// 典型弹道工况参数 (马老师建议: 5km高空爬升平飞 -> 俯冲下滑 -> 15m掠海平飞)
+// ---------------------------------------------------------------------------
+TrajectoryParams typicalTrajectoryParams() {
+    TrajectoryParams p;
+    p.cruise_alt   = 5000.0;                  // 初始爬升巡航高度 5km
+    p.cruise_mach  = config::CRUISE_MACH;     // 0.72
+    p.initial_mass = config::MASS_LAUNCH;     // 1450 kg
+    p.fuel_mass    = config::MASS_FUEL;       // 450 kg
+    p.cruise_alpha = 0.0;                     // 自动计算配平攻角
+    p.enable_typical_profile = true;          // 启用典型多阶段弹道
+    p.climb_target_alt       = 5000.0;        // 爬升段目标 5000m
+    p.high_cruise_dist       = 1000e3;        // 高空平飞巡航 1000km 后转入俯冲
+    p.sea_skim_alt           = 15.0;          // 俯冲下滑至 15m 掠海平飞
     return p;
 }
 
@@ -36,6 +54,7 @@ FlightControlResult calcFlightControl(const StateVec& state, double t, const Tra
     FlightControlResult res{};
     double V     = std::max(state[IDX_V], 1.0);
     double theta = state[IDX_THETA];
+    double x_pos = state[IDX_X];
     double y     = state[IDX_Y];
     double m     = std::max(state[IDX_M], config::MASS_EMPTY);
 
@@ -43,28 +62,82 @@ FlightControlResult calcFlightControl(const StateVec& state, double t, const Tra
     double Ma = V / atm.a;
     double q  = 0.5 * atm.rho * V * V;
 
-    // 飞行阶段判断 (初速处于巡航高亚声速或质量已扣除助推器，均为巡航段)
-    FlightPhase phase = (V > 150.0 || m < params.initial_mass - 1.0)
+    // 飞行阶段判断 (初速处于巡航高亚声速或质量已扣除助推器，均为巡航段；否则由时间与质量严格识别助推段)
+    double mass_without_booster = config::MASS_LAUNCH - config::MASS_BOOSTER;
+    FlightPhase phase = (V > 150.0 || m <= mass_without_booster + 1.0)
                       ? FlightPhase::CRUISE : getFlightPhase(t, m);
 
     // 1. 攻角控制 (姿态与高度导引律)
     double alpha = 0.0;
     if (phase == FlightPhase::BOOST) {
         // 助推段: 采用程序转弯导引
-        // 发射仰角约 30 deg，助推时间内平滑引导至接近水平 (0 deg)
+        // 发射仰角约 30 deg，助推时间内平滑引导至预定转弯角
         const double theta_initial = 30.0 * config::DEG2RAD;
         double ratio = std::clamp(t / config::BOOSTER_BURN_TIME, 0.0, 1.0);
-        double theta_target = theta_initial * (1.0 - ratio);
+        // 典型弹道保持稍高仰角(~16°)，为5km爬升储备初始仰角；基准弹道引导至水平(0°)
+        double end_theta = params.enable_typical_profile ? (16.0 * config::DEG2RAD) : 0.0;
+        double theta_target = theta_initial + (end_theta - theta_initial) * ratio;
 
         // 姿态闭环: 攻角由目标倾角偏差控制，保证法向力克服低速重力下沉
         double alpha_cmd = 1.5 * (theta_target - theta) + 3.0 * config::DEG2RAD;
         alpha = std::clamp(alpha_cmd, -1.0 * config::DEG2RAD, 10.0 * config::DEG2RAD);
     } else {
-        // 巡航段 / 过渡段
+        // 巡航阶段
         if (params.cruise_alpha > 0.0) {
             alpha = params.cruise_alpha;
+        } else if (params.enable_typical_profile) {
+            // ================================================================
+            // 马老师建议典型弹道剖面导引控制律:
+            // 5km爬升 -> 5km高空平飞 -> 俯冲下滑 -> 15m超低空掠海平飞
+            // ================================================================
+            double h_target = params.climb_target_alt;
+            double theta_min = -2.5 * config::DEG2RAD;
+            double theta_max = 5.0 * config::DEG2RAD;
+
+            // 子阶段判定
+            bool is_high_phase = (x_pos < params.high_cruise_dist);
+
+            if (is_high_phase) {
+                // 高空阶段: 爬升与5000m平飞
+                h_target = params.climb_target_alt;
+                if (y < params.climb_target_alt - 80.0) {
+                    // 爬升段: 浅角高效爬升 (上限3.0°)，严格限制重力分量，保证主发加速储备
+                    theta_min = 0.0 * config::DEG2RAD;
+                    theta_max = 3.0 * config::DEG2RAD;
+                } else {
+                    // 5000m 高空平飞段: 微调保持高度
+                    theta_min = -1.5 * config::DEG2RAD;
+                    theta_max = 2.0 * config::DEG2RAD;
+                }
+            } else {
+                // 下滑与低空掠海阶段
+                h_target = params.sea_skim_alt;
+                if (y > params.sea_skim_alt + 30.0) {
+                    // 俯冲下滑段: 平稳受控下滑，倾角限制在 [-3.0°, 0°]
+                    theta_min = -3.0 * config::DEG2RAD;
+                    theta_max = 0.5 * config::DEG2RAD;
+                } else {
+                    // 15m 超低空掠海平飞段: 精确保持高度
+                    theta_min = -1.0 * config::DEG2RAD;
+                    theta_max = 2.0 * config::DEG2RAD;
+                }
+            }
+
+            // 一阶平滑高度捕获导引律 (临界阻尼，无超调)
+            double tau_h = (is_high_phase && y < params.climb_target_alt - 80.0) ? 25.0 : 15.0;
+            double h_dot_des = std::clamp((h_target - y) / tau_h, -12.0, 11.0);
+            double theta_des = h_dot_des / std::max(V, 30.0);
+            double h_dot_actual = V * std::sin(theta);
+            double theta_cmd = theta_des - 0.35 * (h_dot_actual - h_dot_des) / std::max(V, 30.0);
+            theta_cmd = std::clamp(theta_cmd, theta_min, theta_max);
+
+            // 攻角控制: 配平攻角 + 倾角闭环跟踪
+            double weight = m * config::g0;
+            double alpha_trim = calcTrimAlpha(Ma, q, weight);
+            double alpha_cmd = alpha_trim + 1.5 * (theta_cmd - theta);
+            alpha = std::clamp(alpha_cmd, -1.0 * config::DEG2RAD, 11.0 * config::DEG2RAD);
         } else {
-            // 自动高度捕获与高度保持闭环
+            // 原始单段高度捕获与高度保持闭环
             // 1) 静态重力配平攻角 (L = m*g)
             double weight = m * config::g0;
             double alpha_trim = calcTrimAlpha(Ma, q, weight);
@@ -79,7 +152,6 @@ FlightControlResult calcFlightControl(const StateVec& state, double t, const Tra
                                           -2.5 * config::DEG2RAD, 4.0 * config::DEG2RAD);
 
             // 3) 攻角控制指令: 跟踪 theta_cmd
-            // 攻角上限放宽至 11.0 deg (失速角 14 deg)，保证低速 (90~120 m/s) 过渡段升力充足
             double alpha_cmd = alpha_trim + 1.5 * (theta_cmd - theta);
             alpha = std::clamp(alpha_cmd, -1.0 * config::DEG2RAD, 11.0 * config::DEG2RAD);
         }

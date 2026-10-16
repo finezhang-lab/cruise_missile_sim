@@ -49,6 +49,12 @@ struct TrajectoryParams {
     double initial_mass;   // 发射质量 [kg]
     double fuel_mass;      // 巡航段可用燃油 [kg]
     double cruise_alpha;   // 巡航攻角 [rad] (若为 0 则自动计算配平攻角)
+
+    // 典型弹道多阶段剖面配置 (马老师建议: 5km高空爬升平飞 -> 俯冲下滑 -> 15m掠海平飞)
+    bool   enable_typical_profile = false; // 是否启用典型多阶段弹道
+    double climb_target_alt       = 5000.0;// 爬升目标高度 [m]
+    double high_cruise_dist       = 1000e3;// 高空巡航转俯冲航程阈值 [m] (默认 1000 km)
+    double sea_skim_alt           = 15.0;  // 低空掠海巡航高度 [m]
 };
 
 // 飞控与推力计算结果
@@ -73,5 +79,8 @@ StateVec trajectoryDerivatives(const StateVec& state, double t, const Trajectory
 bool checkTermination(const StateVec& state, double t, const TrajectoryParams& params,
                       double initial_fuel_mass);
 
-// 生成默认工况参数
+// 生成默认工况参数 (基准海平面单段巡航)
 TrajectoryParams defaultTrajectoryParams();
+
+// 生成典型弹道工况参数 (马老师建议: 5km高空平飞 + 俯冲 + 15m掠海平飞)
+TrajectoryParams typicalTrajectoryParams();
