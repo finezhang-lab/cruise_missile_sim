@@ -93,7 +93,8 @@ PhaseAnalysis analyzeBaseline(const std::vector<TrajectoryRecord>& records) {
     const auto& last = records.back();
     pa.total_range_km    = last.x / 1000.0;
     pa.total_flight_min  = last.t / 60.0;
-    pa.total_fuel_kg     = (config::MASS_LAUNCH - config::MASS_BOOSTER) - last.m;
+    // 同样以 records.front().m 为基准,避免重复扣减助推器质量
+    pa.total_fuel_kg     = records.front().m - last.m;
 
     return pa;
 }
@@ -118,10 +119,8 @@ static SweepResult extractSweepResult(double param_value,
     const auto& last = records.back();
     sr.range_km        = last.x / 1000.0;
     sr.flight_time_min = last.t / 60.0;
+    // 注意: runCase() 起点已是"巡航段质量(已扣助推器)",此处不可重复扣减
     double initial_cruise_m = records.front().m;
-    if (initial_cruise_m > (config::MASS_LAUNCH - config::MASS_BOOSTER + 1.0)) {
-        initial_cruise_m -= config::MASS_BOOSTER;
-    }
     sr.fuel_consumed_kg = initial_cruise_m - last.m;
 
     // 巡航段平均 L/D 和 sfc
