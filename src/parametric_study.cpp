@@ -230,6 +230,9 @@ std::vector<SweepResult> sweepMass(double m0_min, double m0_max, double step,
 // 输出: 基准工况分析打印
 // ---------------------------------------------------------------------------
 void printPhaseAnalysis(const PhaseAnalysis& pa) {
+    // 显式设定 fixed 格式: 避免依赖外部 stream 状态导致科学计数法输出
+    std::cout << std::fixed;
+
     std::cout << "  === 全弹道气动和动力表现分析 (基准工况 C-1) ===\n\n";
     std::cout << "\n  --- 巡航段 ---\n";
     std::cout << "    平均配平攻角:   " << std::setprecision(2)
