@@ -67,6 +67,25 @@ FIGURE_DIR = os.path.join(os.path.dirname(__file__), 'figures')
 def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
 
+def _iter_axes(axes):
+    """统一取出单个 Axes 或 Axes 数组中的所有坐标轴"""
+    if isinstance(axes, np.ndarray):
+        return axes.ravel()
+    return [axes]
+
+def _save(fig, axes, filename):
+    """保存图件: 统一禁用坐标轴的 offset 科学计数法后输出 PNG。
+
+    当数据集中于某个大数值附近时(如 Ma=0.72、h=15 m、V=245 m/s),
+    matplotlib 会把刻度显示为 offset 形式(如 +7.2e-1),使读数无法直接解读。
+    此处统一改为 plain 形式, 坐标轴直接显示真实数值。
+    """
+    for ax in _iter_axes(axes):
+        ax.ticklabel_format(axis='both', style='plain', useOffset=False)
+        ax.get_xaxis().get_offset_text().set_visible(False)
+        ax.get_yaxis().get_offset_text().set_visible(False)
+    fig.savefig(os.path.join(FIGURE_DIR, filename), dpi=150)
+
 # ============================================================================
 # 1. 气动特性绘图
 # ============================================================================
@@ -103,7 +122,7 @@ def plot_aero():
         axes[2].grid(True, alpha=0.3)
 
         plt.tight_layout()
-        plt.savefig(os.path.join(FIGURE_DIR, 'aero_CL_CD.png'), dpi=150)
+        _save(fig, axes, 'aero_CL_CD.png')
         plt.close()
         print("  -> aero_CL_CD.png")
 
@@ -115,7 +134,7 @@ def plot_aero():
         ax.set_title('阻力极曲线 (Ma=0.72)', fontsize=13)
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.savefig(os.path.join(FIGURE_DIR, 'aero_drag_polar.png'), dpi=150)
+        _save(fig, ax, 'aero_drag_polar.png')
         plt.close()
         print("  -> aero_drag_polar.png")
 
@@ -144,7 +163,7 @@ def plot_aero():
         axes[2].grid(True, alpha=0.3)
 
         plt.tight_layout()
-        plt.savefig(os.path.join(FIGURE_DIR, 'aero_mach_sweep.png'), dpi=150)
+        _save(fig, axes, 'aero_mach_sweep.png')
         plt.close()
         print("  -> aero_mach_sweep.png")
     else:
@@ -169,7 +188,7 @@ def plot_propulsion():
         ax.set_title('固体助推器推力-时间曲线', fontsize=13)
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.savefig(os.path.join(FIGURE_DIR, 'propulsion_booster.png'), dpi=150)
+        _save(fig, ax, 'propulsion_booster.png')
         plt.close()
         print("  -> propulsion_booster.png")
     else:
@@ -194,7 +213,7 @@ def plot_propulsion():
         axes[1].grid(True, alpha=0.3)
 
         plt.tight_layout()
-        plt.savefig(os.path.join(FIGURE_DIR, 'propulsion_engine.png'), dpi=150)
+        _save(fig, axes, 'propulsion_engine.png')
         plt.close()
         print("  -> propulsion_engine.png")
 
@@ -213,11 +232,12 @@ def plot_trajectory():
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
-    colors = ['b', 'r', 'g', 'm', 'c', 'orange', 'k']
+    # 使用 tab10 配色, 保证曲线数增加时颜色不重复(原固定色表仅 7 种, 9 条曲线时会撞色)
+    cmap = plt.get_cmap('tab10')
     for idx, fpath in enumerate(sorted(traj_files)):
         df = pd.read_csv(fpath)
         case_name = os.path.basename(fpath).replace('trajectory_', '').replace('.csv', '')
-        color = colors[idx % len(colors)]
+        color = cmap(idx % 10)
 
         # 弹道曲线 x-y
         axes[0, 0].plot(df['x_m'] / 1000, df['y_m'], color=color, linewidth=1.5, label=case_name)
@@ -257,7 +277,7 @@ def plot_trajectory():
 
     plt.suptitle('BGM-109 巡航导弹弹道仿真结果对比', fontsize=15, fontweight='bold')
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURE_DIR, 'trajectory_comparison.png'), dpi=150)
+    _save(fig, axes, 'trajectory_comparison.png')
     plt.close()
     print("  -> trajectory_comparison.png")
 
@@ -294,7 +314,7 @@ def plot_trajectory():
 
         plt.suptitle('BGM-109 基准工况 (海上巡航 Ma=0.72, H=15m)', fontsize=15, fontweight='bold')
         plt.tight_layout()
-        plt.savefig(os.path.join(FIGURE_DIR, 'trajectory_baseline_detail.png'), dpi=150)
+        _save(fig, axes, 'trajectory_baseline_detail.png')
         plt.close()
         print("  -> trajectory_baseline_detail.png")
 
@@ -325,7 +345,7 @@ def plot_sweep():
         axes[1].grid(True, alpha=0.3)
 
         plt.tight_layout()
-        plt.savefig(os.path.join(FIGURE_DIR, 'sweep_velocity.png'), dpi=150)
+        _save(fig, axes, 'sweep_velocity.png')
         plt.close()
         print("  -> sweep_velocity.png")
 
@@ -348,7 +368,7 @@ def plot_sweep():
         axes[1].grid(True, alpha=0.3)
 
         plt.tight_layout()
-        plt.savefig(os.path.join(FIGURE_DIR, 'sweep_altitude.png'), dpi=150)
+        _save(fig, axes, 'sweep_altitude.png')
         plt.close()
         print("  -> sweep_altitude.png")
 
@@ -363,7 +383,7 @@ def plot_sweep():
         ax.set_title('射程随初始质量变化', fontsize=13)
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.savefig(os.path.join(FIGURE_DIR, 'sweep_mass.png'), dpi=150)
+        _save(fig, ax, 'sweep_mass.png')
         plt.close()
         print("  -> sweep_mass.png")
 
